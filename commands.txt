@@ -1,0 +1,4 @@
+docker buildx build --load -t tomas/onofre:mtgdownload-latest .
+
+## From Onofre folder
+docker run  -i  -v $PWD/:/data/  -t tomas/onofre:mtgdownload-latest bash

@@ -1,0 +1,9 @@
+datastore:
+  consumer_key: ""
+  consumer_secret: ""
+
+processing:
+  max_retries: 3
+  temp_dir: "./temp"
+  fire_csv: "Fire_spread_events_final_review.csv"
+  done_cases_file: "AlreadyDoneMTG.txt"
