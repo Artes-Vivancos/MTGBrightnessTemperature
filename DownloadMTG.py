@@ -230,9 +230,7 @@ def ProcessFile(f,c,a):
     # files = find_files_and_readers(base_dir='./temp/', reader='fci_l1c_nc')
 
     scn = Scene(filenames=f, reader='fci_l1c_nc')
-
-    print(scn.available_dataset_names())
-
+    # print(scn.available_dataset_names())
     xmin=c["long"].min()
     ymin=c["lat"].min()
     xmax=c["long"].max()
@@ -242,11 +240,10 @@ def ProcessFile(f,c,a):
     #lseu_crop = lseu.crop(ll_bbox=(-0.5, 40., 4.17, 43.12))
     lseu_crop = lseu.crop(ll_bbox=(xmin, ymin, xmax, ymax))
     filename=Path(str(c["fire"].iloc[0])+"_"+str(a)+".nc")
-    print(filename.as_posix())
     lseu_crop.save_datasets(filename=filename.as_posix(), engine='netcdf4')
     return FixNetCDF(Path(filename))
 
-def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
+def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir,done_cases_file):
     """
     Downloads the MTG FCI chunk files corresponding to a fire case and processes the files.
     TODO: request a temporal folder to Python
@@ -267,6 +264,8 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
     download retries for each file to download
     temp_dir:
     temporal folder for the processed chunks for each timestep
+    done_cases_file:
+    path to text file with already done cases file
     """
     
     folder_path = Path(temp_dir)
@@ -285,8 +284,7 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
     selected_collection = datastore.get_collection('EO:EUM:DAT:0665')
 
 
-    a=0
-    listfiles=[]
+
     xmin=c["long"].min()
     ymin=c["lat"].min()
     xmax=c["long"].max()
@@ -322,7 +320,6 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
                                 print(f"Saved file "+temp_dir+str(local_filename))
                                 tiles.append(temp_dir+os.sep+str(local_filename))
                                 # listfiles.append(ProcessFile(local_filename,c,a))
-                                a+=1
                                 break
                         except urllib3.exceptions.ProtocolError as e:
                             print(f"Attempt {i+1} failed: {e}")
@@ -346,14 +343,24 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
             continue
 
         cycle = m.group(1)
-        tiles_by_cycle[cycle].append(f)
+        
+        # Extract acquisition day from IDPFI window
+        m_day = re.search(r'_IDPFI_OPE_(\d{8})\d{6}_\d{14}_', fname)
+        if not m_day:
+            continue
+        day = m_day.group(1)  # YYYYMMDD
+
+        key = (day, cycle)        
+
+        tiles_by_cycle[key].append(f)
     
     print("Tiles by time step",tiles_by_cycle)
     per_cycle_nc = []
     a=0
-    for timestep, files in tiles_by_cycle.items():
+    listfiles=[]
+    for (day, cycle), files  in  sorted(tiles_by_cycle.items()):
         listfiles.append(ProcessFile(files,c,a))
-        a=+1
+        a+=1
 
     if listfiles:
         print(listfiles)
@@ -364,10 +371,6 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
         for v in ds.variables:
             ds[v].encoding = {}
         
-        print(ds["time"].dtype)
-        print(ds["time"].values[:])
-        print(ds["time"].encoding)
-        
         ds.to_netcdf(str(c["fire"].iloc[0])+".nc",encoding={
             "time": {
                 "dtype": "int64",                          # store as integer
@@ -377,9 +380,11 @@ def DownloadData(c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir):
         for f in listfiles:
             if os.path.isfile(f):  # check if file exists
                 os.remove(f)
+        with open(done_cases_file, "a", encoding="utf-8") as f:
+            f.write(c["fire"].iloc[0]+"\n")
     else:
         print(c["fire"].iloc[0], " no products found in EUMDAC!")
-    
+    exit(1)
 #This is for Bemuza case to get time date from html field of the kmz
 def GetDate(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -398,7 +403,7 @@ def GetDate(html):
 
     return datetime.strptime(data['FeHo'],"%Y%m%d_%H%M")
 
-with open("config.yml", "r") as f:
+with open("config_tom.yml", "r") as f:
     cfg = yaml.safe_load(f)
 
 consumer_key =  cfg["datastore"]["consumer_key"]
@@ -438,5 +443,5 @@ for c in Cases:
         print(c,df_c["time"].min(),df_c["time"].max(),df_c["time"].max()-df_c["time"].min())
         if (df_c["time"].max()-df_c["time"].min()).days > 4:
             print("Mes de 4 dies!: ",c)
-        DownloadData(df_c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir)
+        DownloadData(df_c,idx,geoms,consumer_key,consumer_secret,max_retries,temp_dir,done_cases_file)
         
